@@ -1,8 +1,8 @@
 # 🤖 eva-ai
 
-> Personaliza tu flujo de desarrollo agéntico desde una unidad de comando central.
+## 🚧 PROYECTO EN CONTRUCCIÓN. 🚧
 
-## 🚧 PROYECTO EN CONSTRUCCION. NO HAGAS PULL 🚧
+> Personaliza tu flujo de desarrollo agéntico desde una unidad de comando central.
 
 eva-ai es una herramienta CLI que inyecta tus Skills personalizadas, flujo de trabajo SDD, servidores MCP y Persona en todos tus agentes de AI.
 Vos decile a EVA qué necesitás y ella se encarga de que tus agentes trabajen como tú necesitas.
@@ -10,7 +10,14 @@ Vos decile a EVA qué necesitás y ella se encarga de que tus agentes trabajen c
 Inspirado en [gentle-ai](https://github.com/Gentleman-Programming/gentle-ai), construido desde cero con foco en la facilidad de configuración al desarrollador.
 
 ```bash
-eva install --agent claude-code,cursor --preset full
+# Inicializá tu proyecto
+eva init
+
+# Inyectá en tu agente de AI
+eva install --agent claude-code --preset full
+
+# Agregá skills externos
+eva skill add https://github.com/JuliusBrussee/caveman/blob/main/skills/caveman/SKILL.md
 ```
 
 ---
@@ -27,60 +34,85 @@ eva-ai resuelve eso. Definís tu flujo de trabajo una vez, lo inyectás en todos
 
 ## Agentes soportados
 
-| Agente | Ubicación de configuración |
-|---|---|
-| **Claude Code** | `~/.claude/CLAUDE.md` |
-| **Cursor** | `~/.cursor/rules/.cursorrules` |
-| **GitHub Copilot** | `.github/copilot-instructions.md` |
-| **OpenCode** | `~/.config/opencode/AGENTS.md` |
-| **Windsurf** | `~/.codeium/windsurf/memories/global_rules.md` |
+| Agente | Ubicación de configuración | Estado |
+|---|---|---|
+| **Claude Code** | `~/.claude/CLAUDE.md` | ✅ Soportado |
+| **Cursor** | `~/.cursor/rules/.cursorrules` | 🚧 Adapter pendiente |
+| **GitHub Copilot** | `.github/copilot-instructions.md` | 🚧 Adapter pendiente |
+| **OpenCode** | `~/.config/opencode/AGENTS.md` | 🚧 Adapter pendiente |
+| **Windsurf** | `~/.codeium/windsurf/memories/global_rules.md` | 🚧 Adapter pendiente |
 
 ---
 
 ## Componentes
 
-| Componente | Descripción |
-|---|---|
-| `sdd` | Spec-Driven Development — planificá antes de codear |
-| `skills` | Tus patrones de código y buenas prácticas |
-| `mcp` | Registro de servidores MCP (Context7, etc.) |
-| `persona` | Comportamiento del agente, estilo y tono |
+| Componente | Descripción | Estado |
+|---|---|---|
+| `sdd` | Spec-Driven Development — planificá antes de codear | ✅ |
+| `skills` | Tus patrones de código y buenas prácticas | ✅ |
+| `mcp` | Registro de servidores MCP (Context7, etc.) | 🚧 |
+| `persona` | Comportamiento del agente, estilo y tono | 🚧 |
 
 ---
 
 ## Instalación
 
 ```bash
-# Homebrew (macOS) — próximamente
-brew tap codebymaribel/tap
-brew install eva-ai
-
 # Go install
 go install github.com/codebymaribel/eva-ai/cmd/directive@latest
+
+# O compilar desde source
+git clone https://github.com/codebymaribel/eva-ai.git
+cd eva-ai
+go build -o bin/eva ./cmd/directive
 ```
 
 ---
 
 ## Uso
 
+### `eva init` — Configurá tu proyecto
+
+Escaneá tu codebase, detecta el stack, y crea `.eva/` con skills core y skills específicos del proyecto.
+
 ```bash
-# Stack completo — instala todo en Claude Code y Cursor
-eva install --agent claude-code,cursor --preset full
+# Init completo — escanea proyecto y crea todos los skills
+eva init
 
-# Minimal — solo persona
-eva install --agent claude-code --preset minimal
-
-# Elegís los componentes específicos
-eva install --agent cursor --component sdd,skills,persona
-
-# Vista previa sin hacer ningún cambio
-eva install --agent claude-code --dry-run
-
-# Ver qué está soportado
-eva install --help
+# Init sin skills — solo estructura SDD
+eva init --no-skills
 ```
 
-### Presets
+**Lo que crea:**
+
+```
+.eva/
+├── README.md                     ← punto de entrada del agente
+├── memory.md                     ← contexto de misiones (gitignored)
+├── phases/                       ← outputs de fases SDD (gitignored)
+├── skills/
+│   ├── README.md                 ← índice de skills con triggers
+│   ├── architecture/SKILL.md     ← core: stack, patrones, estructura
+│   ├── testing/SKILL.md          ← core: convenciones de testing
+│   ├── git-workflow/SKILL.md     ← core: convenciones de git
+│   └── domain/SKILL.md           ← generado: lógica de negocio
+└── docs/                         ← documentación de features
+```
+
+### `eva install` — Inyectá en agentes
+
+```bash
+# Stack completo para Claude Code
+eva install --agent claude-code --preset full
+
+# Elegís componentes específicos
+eva install --agent claude-code --component sdd,skills
+
+# Vista previa sin hacer cambios
+eva install --agent claude-code --dry-run
+```
+
+**Presets:**
 
 | Preset | Componentes incluidos |
 |---|---|
@@ -88,24 +120,51 @@ eva install --help
 | `minimal` | persona |
 | `custom` | vos elegís con `--component` |
 
+### `eva skill add` — Agregá skills externos
+
+```bash
+# Desde un archivo local
+eva skill add ./path/to/SKILL.md
+
+# Desde una URL de GitHub
+eva skill add https://github.com/JuliusBrussee/caveman/blob/main/skills/caveman/SKILL.md
+
+# Desde una URL raw
+eva skill add https://raw.githubusercontent.com/user/repo/main/SKILL.md
+```
+
+**Qué pasa:**
+1. Descarga/copia el SKILL.md a `.eva/skills/<nombre>/`
+2. Actualiza `.eva/skills/README.md` con la nueva entrada
+3. Inyecta el skill en configs de agentes existentes (CLAUDE.md, .cursorrules, etc.)
+
+El agente ve las reglas del skill desde el primer mensaje — sin necesidad de invocación manual.
+
 ---
 
 ## Cómo funciona
 
 ```
-eva install --agent claude-code --preset full
-      │
-      ├── 1. Detecta tu OS y plataforma
-      ├── 2. Valida que Claude Code esté instalado
-      ├── 3. Hace backup de tu configuración existente
-      ├── 4. Inyecta el flujo SDD → CLAUDE.md
-      ├── 5. Inyecta tus Skills → CLAUDE.md
-      ├── 6. Registra los servidores MCP → settings.json
-      ├── 7. Inyecta la Persona → CLAUDE.md
-      └── 8. Verifica que todo quedó bien
-```
+eva init
+  ├── 1. Escanea proyecto (lenguaje, framework, patrones, tooling)
+  ├── 2. Crea estructura de directorios .eva/
+  ├── 3. Escribe skills core (architecture, testing, git-workflow)
+  └── 4. Genera skills específicos del proyecto
 
-Si algo falla, hace rollback automáticamente. Tu configuración original nunca se pierde.
+eva install --agent claude-code --component sdd,skills
+  ├── 1. Detecta tu OS y plataforma
+  ├── 2. Valida que Claude Code esté instalado
+  ├── 3. Lee CLAUDE.md existente
+  ├── 4. Renderiza componentes seleccionados
+  ├── 5. Appendea a CLAUDE.md
+  └── 6. Listo — el agente ve la nueva config en la próxima sesión
+
+eva skill add <url>
+  ├── 1. Descarga SKILL.md (normaliza URLs de GitHub)
+  ├── 2. Guarda en .eva/skills/<nombre>/SKILL.md
+  ├── 3. Refresca .eva/skills/README.md
+  └── 4. Inyecta en configs de agentes existentes
+```
 
 ---
 
@@ -143,23 +202,18 @@ go build -o bin/eva ./cmd/directive
 
 ```
 eva-ai/
-├── cmd/directive/          # Punto de entrada del CLI
+├── cmd/directive/              # Punto de entrada del CLI
 ├── internal/
-│   ├── agents/             # Interface Agent + tipos compartidos
-│   │   ├── claudecode/     # Adapter de Claude Code
-│   │   ├── cursor/         # Adapter de Cursor
-│   │   ├── copilot/        # Adapter de GitHub Copilot
-│   │   ├── opencode/       # Adapter de OpenCode
-│   │   └── windsurf/       # Adapter de Windsurf
-│   ├── app/                # Wiring de comandos Cobra
-│   ├── cli/                # Flags, validación, InstallOptions
-│   ├── system/             # Detección de OS y distro
-│   ├── components/         # Lógica de SDD, Skills, MCP, Persona  [Fase 3]
-│   ├── planner/            # Grafo de dependencias                 [Fase 4]
-│   ├── pipeline/           # Ejecución staged + rollback           [Fase 4]
-│   ├── backup/             # Snapshot y restore de configs         [Fase 4]
-│   ├── verify/             # Health checks post-instalación        [Fase 4]
-│   └── tui/                # Terminal UI interactiva               [Fase 5]
+│   ├── agents/                 # Interface Agent + adapters
+│   │   ├── agent.go            # Interfaces Agent + InjectableAgent
+│   │   └── claudecode/         # Adapter de Claude Code
+│   ├── app/                    # Wiring de comandos Cobra
+│   ├── cli/                    # Flags, validación, InstallOptions
+│   ├── components/
+│   │   ├── sdd/                # Componente SDD (orchestrator + 6 fases)
+│   │   └── skills/             # Componente Skills (core + template)
+│   ├── scanner/                # Detección de stack y patrones del proyecto
+│   └── system/                 # Detección de OS y distro
 └── Makefile
 ```
 
@@ -168,8 +222,10 @@ eva-ai/
 ## Roadmap
 
 - [x] Fase 1 — Base del CLI, detección de OS, validación de flags
-- [x] Fase 2 — Adapters de agentes (Claude Code, Cursor, Copilot, OpenCode, Windsurf)
-- [ ] Fase 3 — Componentes (SDD, Skills, MCP, Persona)
+- [x] Fase 2 — Adapters de agentes (Claude Code)
+- [x] Fase 3 — Componentes (SDD, Skills)
+- [ ] Fase 3 — Componentes (MCP, Persona)
+- [ ] Fase 2 — Adapters de agentes (Cursor, Copilot, OpenCode, Windsurf)
 - [ ] Fase 4 — Pipeline, backup y rollback
 - [ ] Fase 5 — TUI interactiva
 - [ ] Fase 6 — Distribución (Homebrew, GoReleaser)
