@@ -209,7 +209,10 @@ func (c *Component) AddFromPath(projectDir, sourcePath string) (string, error) {
 }
 
 // AddFromURL downloads a SKILL.md from a URL into .eva/skills/.
+// Supports GitHub URLs (github.com/...) and raw URLs (raw.githubusercontent.com/...).
 func (c *Component) AddFromURL(projectDir, url string) (string, error) {
+	url = normalizeGitHubURL(url)
+
 	resp, err := http.Get(url)
 	if err != nil {
 		return "", fmt.Errorf("skills: failed to download %s: %w", url, err)
@@ -494,4 +497,27 @@ func extractSkillName(content string) string {
 		}
 	}
 	return ""
+}
+
+// normalizeGitHubURL converts github.com URLs to raw.githubusercontent.com
+// so http.Get returns the file content instead of the HTML page.
+//
+// Supported formats:
+//   - https://github.com/user/repo/blob/main/path/to/SKILL.md
+//   - https://raw.githubusercontent.com/user/repo/main/path/to/SKILL.md (already raw)
+//   - Any other URL (returned as-is)
+func normalizeGitHubURL(url string) string {
+	// Already raw — nothing to do
+	if strings.Contains(url, "raw.githubusercontent.com") {
+		return url
+	}
+
+	// github.com/user/repo/blob/branch/path → raw.githubusercontent.com/user/repo/branch/path
+	if strings.HasPrefix(url, "https://github.com/") || strings.HasPrefix(url, "http://github.com/") {
+		url = strings.Replace(url, "github.com/", "raw.githubusercontent.com/", 1)
+		url = strings.Replace(url, "/blob/", "/", 1)
+		return url
+	}
+
+	return url
 }
