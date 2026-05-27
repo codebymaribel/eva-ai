@@ -16,7 +16,7 @@ How things are done in this project. Concrete examples over abstract rules.
 ### Pattern name
 What it is and why we use it.
 
-```typescript
+```[language]
 // ✅ correct
 example here
 
