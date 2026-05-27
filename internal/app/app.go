@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/codebymaribel/eva-ai/internal/agents"
+	"github.com/codebymaribel/eva-ai/internal/agents/claudecode"
 	"github.com/codebymaribel/eva-ai/internal/cli"
 	"github.com/codebymaribel/eva-ai/internal/components/sdd"
 	"github.com/codebymaribel/eva-ai/internal/components/skills"
@@ -120,9 +122,88 @@ func runInstall(agentFlag, componentFlag, presetFlag string, dryRun bool) error 
 		return nil
 	}
 
-	// 4. TODO (Phase 2+): run planner → pipeline
-	fmt.Println("\n🚧 Pipeline coming in Phase 2...")
+	// 4. Run install for each agent
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		return fmt.Errorf("failed to get home directory: %w", err)
+	}
+
+	for _, agent := range agents {
+		adapter := resolveAgentAdapter(agent, homeDir)
+		if adapter == nil {
+			fmt.Printf("\n⚠️  %s: adapter not implemented yet — skipping\n", agent)
+			continue
+		}
+
+		if !adapter.IsInstalled() {
+			fmt.Printf("\n⚠️  %s: not installed — skipping\n", agent)
+			continue
+		}
+
+		fmt.Printf("\n🔧 Configuring %s...\n", agent)
+
+		// Read existing config
+		existing, err := adapter.ReadMainMD()
+		if err != nil {
+			return fmt.Errorf("failed to read %s config: %w", agent, err)
+		}
+
+		// Build content from selected components
+		var blocks []string
+		for _, comp := range opts.Components {
+			block, err := renderComponent(comp)
+			if err != nil {
+				return fmt.Errorf("failed to render component %s: %w", comp, err)
+			}
+			if block != "" {
+				blocks = append(blocks, block)
+			}
+		}
+
+		// Combine: existing content + new component blocks
+		combined := existing
+		for _, block := range blocks {
+			combined += "\n\n" + block
+		}
+
+		// Write to agent config
+		if err := adapter.WriteNewMD(combined); err != nil {
+			return fmt.Errorf("failed to write %s config: %w", agent, err)
+		}
+
+		fmt.Printf("   ✅ %s configured\n", adapter.Name())
+	}
+
+	fmt.Println("\n✅ Install complete!")
 	return nil
+}
+
+// resolveAgentAdapter returns the adapter for a given agent, or nil if not implemented.
+func resolveAgentAdapter(agent cli.Agent, homeDir string) agents.InjectableAgent {
+	switch agent {
+	case cli.AgentClaudeCode:
+		return claudecode.New(homeDir)
+	default:
+		return nil
+	}
+}
+
+// renderComponent renders the content for a given component.
+func renderComponent(comp cli.Component) (string, error) {
+	switch comp {
+	case cli.ComponentSDD:
+		c := sdd.New()
+		return c.Render(), nil
+	case cli.ComponentSkills:
+		c := skills.New()
+		return c.Render(), nil
+	case cli.ComponentMCP:
+		return "", nil // not implemented yet
+	case cli.ComponentPersona:
+		return "", nil // not implemented yet
+	default:
+		return "", fmt.Errorf("unknown component: %s", comp)
+	}
 }
 
 func newSkillCmd() *cobra.Command {

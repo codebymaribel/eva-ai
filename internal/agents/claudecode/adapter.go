@@ -11,7 +11,6 @@ import (
 	"github.com/codebymaribel/eva-ai/internal/agents"
 )
 
-
 const configDirName = ".claude"
 
 const mainConfigFile = "CLAUDE.md"
@@ -36,7 +35,6 @@ func (a *Adapter) MainConfigPath() string {
 	return filepath.Join(a.ConfigDir(), mainConfigFile)
 }
 
-
 func (a *Adapter) ConfigFiles() []agents.ConfigFile {
 	return []agents.ConfigFile{
 		{
@@ -52,7 +50,7 @@ func (a *Adapter) ConfigFiles() []agents.ConfigFile {
 //
 // Strategy:
 //  1. Find "claude" binary on PATH (common installation)
-//  2. If eva cant find it, verifies if claude config directory exists 
+//  2. If eva cant find it, verifies if claude config directory exists
 //     (in case it's installed but not on path)
 
 func (a *Adapter) IsInstalled() bool {
@@ -76,7 +74,15 @@ func (a *Adapter) CanAdapterRun() error {
 	if !a.IsInstalled() {
 		return &agents.ErrNotInstalled{AgentName: a.Name()}
 	}
+	return a.validateConfigDir()
+}
 
+// Validate implements agents.Agent.
+func (a *Adapter) Validate() error {
+	return a.CanAdapterRun()
+}
+
+func (a *Adapter) validateConfigDir() error {
 	info, err := os.Stat(a.ConfigDir())
 	if err != nil {
 		if os.IsNotExist(err) {

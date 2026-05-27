@@ -4,10 +4,19 @@ import "fmt"
 
 // Agent is the contract every adapter must fulfill.
 type Agent interface {
-	Name()        string
-	ConfigDir()   string
+	Name() string
+	ConfigDir() string
 	IsInstalled() bool
-	Validate()    error
+	Validate() error
+}
+
+// InjectableAgent extends Agent with the ability to read and write
+// its main config file. Adapters that support injection implement this.
+type InjectableAgent interface {
+	Agent
+	MainConfigPath() string
+	ReadMainMD() (string, error)
+	WriteNewMD(content string) error
 }
 
 // ConfigFile represents a configuration file an adapter manages.
