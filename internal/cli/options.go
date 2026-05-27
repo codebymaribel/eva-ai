@@ -46,10 +46,10 @@ type InstallOptions struct {
 var SupportedAgents = map[Agent]bool{
 	AgentClaudeCode: true,
 	AgentOpenCode:   true,
-	AgentCursor:     false,
-	AgentCopilot:    false,
-	AgentWindsurf:   false,
-	AgentAntigravity: false,
+	AgentCursor:     true,
+	AgentCopilot:    true,
+	AgentWindsurf:   true,
+	AgentAntigravity: true,
 }
 
 

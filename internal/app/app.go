@@ -2,12 +2,17 @@ package app
 
 import (
 	"fmt"
+	"os"
+	"path/filepath"
+	"strings"
 
-	"github.com/spf13/cobra"
 	"github.com/codebymaribel/eva-ai/internal/cli"
+	"github.com/codebymaribel/eva-ai/internal/components/sdd"
+	"github.com/codebymaribel/eva-ai/internal/components/skills"
+	"github.com/codebymaribel/eva-ai/internal/scanner"
 	"github.com/codebymaribel/eva-ai/internal/system"
+	"github.com/spf13/cobra"
 )
-
 
 func Execute() error {
 	return newRootCmd().Execute()
@@ -25,6 +30,8 @@ into Claude Code, Cursor, Copilot, OpenCode, and Windsurf — with one command.`
 	}
 
 	root.AddCommand(newInstallCmd())
+	root.AddCommand(newInitCmd())
+	root.AddCommand(newSkillCmd())
 	root.AddCommand(newVersionCmd())
 
 	return root
@@ -67,7 +74,7 @@ func newInstallCmd() *cobra.Command {
 }
 
 func runInstall(agentFlag, componentFlag, presetFlag string, dryRun bool) error {
-	
+
 	agents, err := cli.ParseAgents(agentFlag)
 	if err != nil {
 		return err
@@ -94,7 +101,6 @@ func runInstall(agentFlag, componentFlag, presetFlag string, dryRun bool) error 
 		return err
 	}
 
-	
 	platform, err := system.Detect()
 	if err != nil {
 		return fmt.Errorf("platform detection failed: %w", err)
@@ -119,6 +125,74 @@ func runInstall(agentFlag, componentFlag, presetFlag string, dryRun bool) error 
 	return nil
 }
 
+func newSkillCmd() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "skill",
+		Short: "Manage skills — add, list, or remove",
+	}
+
+	cmd.AddCommand(newSkillAddCmd())
+
+	return cmd
+}
+
+func newSkillAddCmd() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "add <path-or-url>",
+		Short: "Add a skill from a local file or URL",
+		Example: `  # From a local file
+  eva skill add ./my-skill/SKILL.md
+
+  # From a URL
+  eva skill add https://raw.githubusercontent.com/user/repo/main/SKILL.md`,
+		Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runSkillAdd(args[0])
+		},
+	}
+
+	return cmd
+}
+
+func runSkillAdd(source string) error {
+	projectDir, err := os.Getwd()
+	if err != nil {
+		return fmt.Errorf("failed to get working directory: %w", err)
+	}
+
+	// Check if .eva/ exists
+	evaDir := filepath.Join(projectDir, ".eva")
+	if _, err := os.Stat(evaDir); os.IsNotExist(err) {
+		return fmt.Errorf(".eva/ not found — run `eva init` first")
+	}
+
+	skillsComp := skills.New()
+
+	if strings.HasPrefix(source, "http://") || strings.HasPrefix(source, "https://") {
+		// URL — download first
+		return fmt.Errorf("URL download not yet implemented — coming soon")
+	}
+
+	// Local path
+	if err := skillsComp.AddFromPath(projectDir, source); err != nil {
+		return fmt.Errorf("failed to add skill: %w", err)
+	}
+
+	skillName := extractSkillNameFromPath(source)
+	fmt.Printf("✅ Skill added: .eva/skills/%s/SKILL.md\n", skillName)
+
+	return nil
+}
+
+func extractSkillNameFromPath(path string) string {
+	// Try to get name from the parent directory name
+	dir := filepath.Dir(path)
+	name := filepath.Base(dir)
+	if name != "." && name != "/" {
+		return name
+	}
+	return "custom"
+}
 
 func newVersionCmd() *cobra.Command {
 	return &cobra.Command{
@@ -128,4 +202,192 @@ func newVersionCmd() *cobra.Command {
 			fmt.Println("my-ai-stack v0.1.0")
 		},
 	}
+}
+
+func newInitCmd() *cobra.Command {
+	var (
+		noSkills bool
+	)
+
+	cmd := &cobra.Command{
+		Use:   "init",
+		Short: "Initialize .eva/ in the current project — scan codebase, create core skills, generate project skills",
+		Example: `  # Full init — scan project and create all skills
+  eva-ai init
+
+  # Init without skills — only SDD structure
+  eva-ai init --no-skills`,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runInit(noSkills)
+		},
+	}
+
+	cmd.Flags().BoolVar(&noSkills, "no-skills", false, "Skip skill generation — only create .eva/ structure")
+
+	return cmd
+}
+
+func runInit(noSkills bool) error {
+	projectDir, err := os.Getwd()
+	if err != nil {
+		return fmt.Errorf("failed to get working directory: %w", err)
+	}
+
+	fmt.Println("🔍 Scanning project...")
+
+	// 1. Detect platform (for future use)
+	platform, err := system.Detect()
+	if err != nil {
+		return fmt.Errorf("platform detection failed: %w", err)
+	}
+	fmt.Printf("🖥️  Platform: %s\n", platform.String())
+
+	// 2. Scan project stack and patterns
+	info, err := scanner.Scan(projectDir)
+	if err != nil {
+		return fmt.Errorf("project scan failed: %w", err)
+	}
+
+	fmt.Printf("📦 Stack: %s", info.Stack.Language)
+	if info.Stack.Framework != "" {
+		fmt.Printf(" + %s", info.Stack.Framework)
+	}
+	fmt.Println()
+
+	if len(info.Patterns) > 0 {
+		fmt.Println("🏗️  Patterns:")
+		for _, p := range info.Patterns {
+			fmt.Printf("   - %s (%s)\n", p.Name, p.Confidence)
+		}
+	}
+
+	// 3. Initialize .eva/ directory structure
+	fmt.Println("\n📁 Creating .eva/ structure...")
+	sddComp := sdd.New()
+	if err := sddComp.InitEvaDir(projectDir); err != nil {
+		return fmt.Errorf("failed to init .eva/: %w", err)
+	}
+	fmt.Println("   ✅ .eva/README.md")
+	fmt.Println("   ✅ .eva/memory.md")
+	fmt.Println("   ✅ .eva/phases/")
+
+	// 4. Initialize core skills
+	if !noSkills {
+		fmt.Println("\n📚 Setting up skills...")
+		skillsComp := skills.New()
+
+		if err := skillsComp.InitSkillsDir(projectDir); err != nil {
+			return fmt.Errorf("failed to init skills: %w", err)
+		}
+		fmt.Println("   ✅ .eva/skills/architecture/SKILL.md")
+		fmt.Println("   ✅ .eva/skills/testing/SKILL.md")
+		fmt.Println("   ✅ .eva/skills/git-workflow/SKILL.md")
+
+		// 5. Generate project-specific skills from scan results
+		fmt.Println("\n🔬 Generating project skills...")
+		if err := generateProjectSkills(projectDir, info, skillsComp); err != nil {
+			return fmt.Errorf("failed to generate project skills: %w", err)
+		}
+
+		// 6. Update .eva/skills/README.md with all skills
+		if err := updateSkillsREADME(projectDir, info); err != nil {
+			return fmt.Errorf("failed to update skills README: %w", err)
+		}
+	}
+
+	fmt.Println("\n✅ .eva/ initialized successfully!")
+	fmt.Println("\nNext steps:")
+	fmt.Println("  1. Review .eva/skills/ — update generated skills with your conventions")
+	fmt.Println("  2. Run `eva install --agent <agent>` to inject into your AI agent")
+	fmt.Println("  3. Start a mission with `/eva [task]` in your agent")
+
+	return nil
+}
+
+// generateProjectSkills creates project-specific SKILL.md files based on scan results.
+func generateProjectSkills(projectDir string, info *scanner.ProjectInfo, comp *skills.Component) error {
+	// Always generate a domain skill
+	domainContent := scanner.GenerateSkillContent(info,
+		"domain",
+		"Business logic, models, entities, and domain-specific rules.",
+		"business logic, domain, models, entities, validation, rules",
+	)
+	if err := writeSkill(projectDir, "domain", domainContent); err != nil {
+		return err
+	}
+	fmt.Println("   ✅ .eva/skills/domain/SKILL.md")
+
+	// Generate API/HTTP skill if the project uses HTTP
+	if info.HTTPClient != "" {
+		apiContent := scanner.GenerateSkillContent(info,
+			"api",
+			fmt.Sprintf("HTTP client (%s), API integration, auth, and request patterns.", info.HTTPClient),
+			"api, http, client, request, auth, endpoint, rest, graphql",
+		)
+		if err := writeSkill(projectDir, "api", apiContent); err != nil {
+			return err
+		}
+		fmt.Println("   ✅ .eva/skills/api/SKILL.md")
+	}
+
+	// Generate stack-specific skill if a framework was detected
+	if info.Stack.Framework != "" {
+		stackContent := scanner.GenerateSkillContent(info,
+			info.Stack.Framework,
+			fmt.Sprintf("Framework-specific patterns and conventions for %s.", info.Stack.Framework),
+			fmt.Sprintf("%s, framework, components, routing, configuration", info.Stack.Framework),
+		)
+		if err := writeSkill(projectDir, info.Stack.Framework, stackContent); err != nil {
+			return err
+		}
+		fmt.Printf("   ✅ .eva/skills/%s/SKILL.md\n", info.Stack.Framework)
+	}
+
+	return nil
+}
+
+// writeSkill writes a SKILL.md file to .eva/skills/<name>/
+func writeSkill(projectDir, name, content string) error {
+	skillDir := filepath.Join(projectDir, ".eva", "skills", name)
+	if err := os.MkdirAll(skillDir, 0755); err != nil {
+		return err
+	}
+	return os.WriteFile(filepath.Join(skillDir, "SKILL.md"), []byte(content), 0644)
+}
+
+// updateSkillsREADME regenerates .eva/skills/README.md with all available skills.
+func updateSkillsREADME(projectDir string, info *scanner.ProjectInfo) error {
+	var b strings.Builder
+
+	b.WriteString("# Project Skills\n\n")
+	b.WriteString("Skills are loaded on demand by SDD agents.\n")
+	b.WriteString("Each skill defines when it should be loaded via its `trigger` field.\n\n")
+	b.WriteString("## Available Skills\n\n")
+	b.WriteString("| Skill | Trigger |\n")
+	b.WriteString("|---|---|\n")
+
+	// Core skills
+	b.WriteString("| `architecture` | Stack, patterns, state, technical decisions |\n")
+	b.WriteString("| `testing` | Tests, coverage, mocks, fixtures |\n")
+	b.WriteString("| `git-workflow` | Git, commits, branches, PRs, releases |\n")
+
+	// Project skills
+	b.WriteString("| `domain` | Business logic, models, entities |\n")
+	if info.HTTPClient != "" {
+		b.WriteString(fmt.Sprintf("| `api` | HTTP client (%s), API integration, auth |\n", info.HTTPClient))
+	}
+	if info.Stack.Framework != "" {
+		b.WriteString(fmt.Sprintf("| `%s` | Framework-specific patterns for %s |\n", info.Stack.Framework, info.Stack.Framework))
+	}
+
+	b.WriteString("\n### Adding a skill\n\n")
+	b.WriteString("```bash\n")
+	b.WriteString("# From a local file\n")
+	b.WriteString("eva skill add ./path/to/SKILL.md\n\n")
+	b.WriteString("# From a URL\n")
+	b.WriteString("eva skill add https://raw.githubusercontent.com/.../SKILL.md\n")
+	b.WriteString("```\n")
+
+	readmePath := filepath.Join(projectDir, ".eva", "skills", "README.md")
+	return os.WriteFile(readmePath, []byte(b.String()), 0644)
 }
