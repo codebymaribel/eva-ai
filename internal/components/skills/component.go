@@ -13,6 +13,8 @@ package skills
 import (
 	_ "embed"
 	"fmt"
+	"io"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
@@ -188,10 +190,10 @@ func (c *Component) InitProjectSkillsDir(projectDir string) error {
 }
 
 // AddFromPath copies a SKILL.md from a local path into .eva/skills/.
-func (c *Component) AddFromPath(projectDir, sourcePath string) error {
+func (c *Component) AddFromPath(projectDir, sourcePath string) (string, error) {
 	content, err := os.ReadFile(sourcePath)
 	if err != nil {
-		return fmt.Errorf("skills: failed to read %s: %w", sourcePath, err)
+		return "", fmt.Errorf("skills: failed to read %s: %w", sourcePath, err)
 	}
 
 	skillName := extractSkillName(string(content))
@@ -199,7 +201,195 @@ func (c *Component) AddFromPath(projectDir, sourcePath string) error {
 		skillName = filepath.Base(filepath.Dir(sourcePath))
 	}
 
-	skillDir := filepath.Join(projectDir, ".eva", "skills", skillName)
+	if err := writeSkill(projectDir, skillName, content); err != nil {
+		return "", err
+	}
+
+	return skillName, nil
+}
+
+// AddFromURL downloads a SKILL.md from a URL into .eva/skills/.
+func (c *Component) AddFromURL(projectDir, url string) (string, error) {
+	resp, err := http.Get(url)
+	if err != nil {
+		return "", fmt.Errorf("skills: failed to download %s: %w", url, err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("skills: download failed — HTTP %d from %s", resp.StatusCode, url)
+	}
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return "", fmt.Errorf("skills: failed to read response from %s: %w", url, err)
+	}
+
+	content := string(body)
+	skillName := extractSkillName(content)
+	if skillName == "" {
+		// Fallback: use the last path segment of the URL (without extension)
+		skillName = strings.TrimSuffix(filepath.Base(url), filepath.Ext(url))
+		if skillName == "" || skillName == "." {
+			skillName = "custom"
+		}
+	}
+
+	if err := writeSkill(projectDir, skillName, body); err != nil {
+		return "", err
+	}
+
+	return skillName, nil
+}
+
+// RefreshREADME regenerates .eva/skills/README.md by scanning the skills directory.
+// Call this after adding a new skill to keep the index in sync.
+func (c *Component) RefreshREADME(projectDir string) error {
+	skillsDir := filepath.Join(projectDir, ".eva", "skills")
+
+	entries, err := os.ReadDir(skillsDir)
+	if err != nil {
+		return fmt.Errorf("skills: failed to read %s: %w", skillsDir, err)
+	}
+
+	var skillNames []string
+	for _, e := range entries {
+		if !e.IsDir() {
+			continue
+		}
+		skillPath := filepath.Join(skillsDir, e.Name(), "SKILL.md")
+		if _, err := os.Stat(skillPath); err == nil {
+			skillNames = append(skillNames, e.Name())
+		}
+	}
+
+	readmePath := filepath.Join(skillsDir, "README.md")
+	readme := renderSkillsREADMEFromNames(skillNames)
+	return os.WriteFile(readmePath, []byte(readme), 0644)
+}
+
+// renderSkillsREADMEFromNames generates the README from a list of skill directory names.
+func renderSkillsREADMEFromNames(names []string) string {
+	var b strings.Builder
+
+	b.WriteString("# Project Skills\n\n")
+	b.WriteString("Skills are loaded on demand by SDD agents.\n")
+	b.WriteString("Each skill defines when it should be loaded via its `trigger` field.\n\n")
+	b.WriteString("## Available Skills\n\n")
+	b.WriteString("| Skill | Trigger |\n")
+	b.WriteString("|---|---|\n")
+
+	for _, name := range names {
+		// Try to read the trigger from the SKILL.md frontmatter
+		trigger := readSkillTrigger(name)
+		b.WriteString(fmt.Sprintf("| `%s` | %s |\n", name, trigger))
+	}
+
+	b.WriteString("\n### Adding a skill\n\n")
+	b.WriteString("```bash\n")
+	b.WriteString("# From a local file\n")
+	b.WriteString("eva skill add ./path/to/SKILL.md\n\n")
+	b.WriteString("# From a URL\n")
+	b.WriteString("eva skill add https://raw.githubusercontent.com/.../SKILL.md\n")
+	b.WriteString("```\n")
+
+	return b.String()
+}
+
+// readSkillTrigger extracts the trigger field from a SKILL.md frontmatter.
+func readSkillTrigger(name string) string {
+	// This is a best-effort read — if it fails, return a generic description
+	data, err := os.ReadFile(filepath.Join(".eva", "skills", name, "SKILL.md"))
+	if err != nil {
+		return "custom skill"
+	}
+	for _, line := range strings.Split(string(data), "\n") {
+		trimmed := strings.TrimSpace(line)
+		if strings.HasPrefix(trimmed, "trigger:") {
+			val := strings.TrimSpace(strings.TrimPrefix(trimmed, "trigger:"))
+			val = strings.Trim(val, `"`)
+			if val != "" {
+				return val
+			}
+		}
+		if strings.HasPrefix(trimmed, "description:") {
+			val := strings.TrimSpace(strings.TrimPrefix(trimmed, "description:"))
+			val = strings.Trim(val, `>"`)
+			if val != "" {
+				return val
+			}
+		}
+	}
+	return "custom skill"
+}
+
+// InjectIntoAgentConfigs finds existing agent config files and appends
+// a reference to the new skill so the agent loads it automatically.
+//
+// This is what makes external skills (like caveman) work without
+// manual invocation — the agent sees the skill rules from message one.
+//
+// If no agent configs exist yet, this is a no-op (the user needs to
+// run `eva install` first).
+func (c *Component) InjectIntoAgentConfigs(projectDir, skillName string) []string {
+	configs := AgentConfigPaths(projectDir)
+	var injected []string
+
+	for _, configPath := range configs {
+		if _, err := os.Stat(configPath); os.IsNotExist(err) {
+			continue // agent not configured yet
+		}
+
+		// Read the skill content
+		skillPath := filepath.Join(projectDir, ".eva", "skills", skillName, "SKILL.md")
+		skillContent, err := readFileOrEmpty(skillPath)
+		if err != nil || skillContent == "" {
+			continue
+		}
+
+		// Build the injection block
+		block := fmt.Sprintf("\n\n## Skill: %s (auto-loaded)\n\n%s\n", skillName, skillContent)
+
+		// Read existing config
+		existing, err := readFileOrEmpty(configPath)
+		if err != nil {
+			continue
+		}
+
+		// Check if this skill is already injected
+		marker := fmt.Sprintf("## Skill: %s (auto-loaded)", skillName)
+		if strings.Contains(existing, marker) {
+			injected = append(injected, configPath)
+			continue // already there
+		}
+
+		// Append the skill block
+		updated := existing + block
+		if err := os.WriteFile(configPath, []byte(updated), 0644); err != nil {
+			continue
+		}
+
+		injected = append(injected, configPath)
+	}
+
+	return injected
+}
+
+// AgentConfigPaths returns the known agent config file paths for the project.
+// These are the files that eva install creates/maintains.
+func AgentConfigPaths(projectDir string) []string {
+	return []string{
+		filepath.Join(projectDir, ".claude", "CLAUDE.md"),
+		filepath.Join(projectDir, ".cursor", "rules", ".cursorrules"),
+		filepath.Join(projectDir, ".github", "copilot-instructions.md"),
+		filepath.Join(projectDir, ".opencode", "AGENTS.md"),
+		filepath.Join(projectDir, ".codeium", "windsurf", "memories", "global_rules.md"),
+	}
+}
+
+// writeSkill writes a SKILL.md to .eva/skills/<name>/
+func writeSkill(projectDir, name string, content []byte) error {
+	skillDir := filepath.Join(projectDir, ".eva", "skills", name)
 	if err := os.MkdirAll(skillDir, 0755); err != nil {
 		return fmt.Errorf("skills: failed to create %s: %w", skillDir, err)
 	}

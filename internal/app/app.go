@@ -167,31 +167,44 @@ func runSkillAdd(source string) error {
 	}
 
 	skillsComp := skills.New()
+	var skillName string
 
 	if strings.HasPrefix(source, "http://") || strings.HasPrefix(source, "https://") {
-		// URL — download first
-		return fmt.Errorf("URL download not yet implemented — coming soon")
+		fmt.Printf("⬇️  Downloading skill from %s...\n", source)
+		skillName, err = skillsComp.AddFromURL(projectDir, source)
+		if err != nil {
+			return err
+		}
+	} else {
+		skillName, err = skillsComp.AddFromPath(projectDir, source)
+		if err != nil {
+			return err
+		}
 	}
 
-	// Local path
-	if err := skillsComp.AddFromPath(projectDir, source); err != nil {
-		return fmt.Errorf("failed to add skill: %w", err)
+	fmt.Printf("✅ Skill saved: .eva/skills/%s/SKILL.md\n", skillName)
+
+	// Update .eva/skills/README.md
+	if err := skillsComp.RefreshREADME(projectDir); err != nil {
+		fmt.Printf("⚠️  Could not update skills README: %v\n", err)
+	} else {
+		fmt.Println("📄 Updated .eva/skills/README.md")
 	}
 
-	skillName := extractSkillNameFromPath(source)
-	fmt.Printf("✅ Skill added: .eva/skills/%s/SKILL.md\n", skillName)
+	// Inject into existing agent configs so the agent sees it automatically
+	injected := skillsComp.InjectIntoAgentConfigs(projectDir, skillName)
+	if len(injected) > 0 {
+		fmt.Println("\n📌 Injected into agent configs:")
+		for _, path := range injected {
+			rel, _ := filepath.Rel(projectDir, path)
+			fmt.Printf("   ✅ %s\n", rel)
+		}
+	} else {
+		fmt.Println("\n💡 No agent configs found. Run `eva install --agent <agent>` first,")
+		fmt.Println("   then re-run `eva skill add` to inject into the agent.")
+	}
 
 	return nil
-}
-
-func extractSkillNameFromPath(path string) string {
-	// Try to get name from the parent directory name
-	dir := filepath.Dir(path)
-	name := filepath.Base(dir)
-	if name != "." && name != "/" {
-		return name
-	}
-	return "custom"
 }
 
 func newVersionCmd() *cobra.Command {
